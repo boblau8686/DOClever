@@ -3,6 +3,7 @@
  */
 var path = require('path')
 var webpack = require('webpack');
+//var BundleAnalyzerPlugin = require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
 module.exports = {
     entry: {
         vendor:["vue","vuex","./web/common/common","./web/util/net","./web/util/local"],
@@ -20,7 +21,8 @@ module.exports = {
         team:"./web/team/team",
         registerqq:"./web/register/registerqq",
         admin:"./web/admin/admin",
-        adminlogin:"./web/admin/adminlogin"
+        adminlogin:"./web/admin/adminlogin",
+        custom:"./web/custom/custom",
     },
     output: {
         path: path.join(__dirname, 'dist'),
@@ -48,7 +50,8 @@ module.exports = {
                 comments: false,  // remove all comments
             }
         }),
-        new webpack.optimize.CommonsChunkPlugin({ name: 'vendor', filename: 'vendor.bundle.js' }),
+        new webpack.optimize.CommonsChunkPlugin({ name: 'vendor', filename: '[name].bundle.js'}),
+        //new BundleAnalyzerPlugin()
     ],
     module: {
         loaders: [
