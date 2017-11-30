@@ -187,13 +187,17 @@ $.confirm=function (title,funcOk,funcCancel) {
 }
 
 $.tip=function (content,bOk) {
-    if(bOk)
+    if(bOk==1)
     {
         Vue.prototype.$message.success(content);
     }
-    else
+    else if(bOk==0)
     {
         Vue.prototype.$message.error(content);
+    }
+    else if(bOk==2)
+    {
+        Vue.prototype.$message.warning(content);
     }
 }
 
@@ -331,8 +335,8 @@ $.stopHud=function () {
     }
 }
 
-$.getNowFormatDate=function(fmt) {
-    var date=new Date();
+$.getNowFormatDate=function(fmt,date) {
+    var date=date || new Date();
     var o = {
         "M+": date.getMonth() + 1, //月份
         "d+": date.getDate(), //日

@@ -43,6 +43,17 @@ var j = schedule.scheduleJob(rule,async (function(){
 
 }));
 
+schedule.scheduleJob("0 0 0 * * *",(async (function () {
+    try
+    {
+        await (util.createStatistic());
+    }
+    catch (err)
+    {
+        console.log(err);
+    }
+})));
+
 var j1=schedule.scheduleJob("0 * * * *",(async (function () {
     try
     {

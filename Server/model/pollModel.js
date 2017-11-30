@@ -61,6 +61,43 @@ var model=new mongoose.Schema({
     count:{
         type:Number,
         default:0
+    },
+    failSend:{
+        type:Number,
+        default:0
+    },
+    phoneInfo:{
+        method:{
+            type:String,
+            default:"GET"
+        },
+        sign:{
+            type:String,
+            default:""
+        },
+        baseUrl:{
+            type:String,
+            default:""
+        },
+        param:{
+            type:Array,
+            default:[{
+                key:"",
+                value:""
+            }]
+        },
+        bindParam:{
+            type:String,
+            default:""
+        },
+        split:{
+            type:String,
+            default:","
+        },
+        contentParam:{
+            type:String,
+            default:""
+        }
     }
 },{
     timestamps:true

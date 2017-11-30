@@ -62,7 +62,7 @@ module.exports = {
             },
             {
                 test: /\.vue$/,
-                loader:"vue-loader",
+                loader:"vue-loader?cacheDirectory",
                 include: path.resolve(__dirname, 'web')
             },
             {
@@ -82,7 +82,7 @@ module.exports = {
             }
          ]
     },
-    //devtool: 'cheap-eval-source-map',
+    //devtool: 'cheap-module-eval-source-map',
     devtool: 'source-map',
     resolve: {
         modules: [path.resolve(__dirname, 'node_modules')],

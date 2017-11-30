@@ -55,6 +55,9 @@ var interface=[
             },
             answer:{
                 type:String
+            },
+            email:{
+                type:String
             }
         },
         "data":{
@@ -97,6 +100,10 @@ var interface=[
                 type:String
             },
             photo:{
+                optional:1,
+                type:String
+            },
+            phone:{
                 optional:1,
                 type:String
             },
