@@ -2,7 +2,8 @@ var async=require("asyncawait/async")
 var await=require("asyncawait/await")
 var e=require("../../util/error.json");
 var util=require("../../util/util");
-var fs=require("fs");
+var blue=require("bluebird");
+var fs=blue.promisifyAll(require("fs"));
 var admin=require("../../model/adminModel")
 var user=require("../../model/userModel")
 var project=require("../../model/projectModel")
@@ -13,9 +14,6 @@ var groupVersion=require("../../model/groupVersionModel")
 var interfaceVersion=require("../../model/interfaceVersionModel")
 var interfaceSnapshot=require("../../model/interfaceSnapshotModel")
 var statusVersion=require("../../model/statusVersionModel")
-var testVersion=require("../../model/testVersionModel")
-var testModuleVersion=require("../../model/testModuleVersionModel")
-var testGroupVersion=require("../../model/testGroupVersionModel")
 var test=require("../../model/testModel")
 var testModule=require("../../model/testModuleModel")
 var testGroup=require("../../model/testGroupModel")
@@ -24,7 +22,13 @@ var status=require("../../model/statusModel")
 var poll=require("../../model/pollModel")
 var version=require("../../model/versionModel")
 var statistic=require("../../model/statisticModel")
+var template=require("../../model/templateModel")
+var example=require("../../model/exampleModel")
+var info=require("../../model/infoModel")
+var docProject=require("../../model/docProjectModel")
+var config=require("../../../config.json")
 var uuid=require("uuid");
+var path=require("path");
 var objectId = require('mongoose').Types.ObjectId;
 function Admin()
 {
@@ -334,7 +338,10 @@ function Admin()
             let arrTeam=await (teamGroup.findAsync({
                 owner:req.clientParam.id
             }))
-            if(arrProject.length>0 || arrTeam.length>0)
+            let arrDoc=await (docProject.findAsync({
+                owner:req.clientParam.id
+            }))
+            if(arrProject.length>0 || arrTeam.length>0 || arrDoc.length>0)
             {
                 util.throw(e.systemReason,"该账户下有项目或者团队，请先解除关联");
             }
@@ -354,6 +361,13 @@ function Admin()
                     users:{
                         user:req.clientParam.id
                     }
+                }
+            }))
+            await (docProject.updateAsync({
+                "users":req.clientParam.id
+            },{
+                $pull:{
+                    users:req.clientParam.id
                 }
             }))
             await (user.removeAsync({
@@ -533,9 +547,6 @@ function Admin()
             await (test.removeAsync({
                 project:req.clientParam.id
             }))
-            await (testVersion.removeAsync({
-                project:req.clientParam.id
-            }))
             let arrTestModule=await (testModule.findAsync({
                 project:req.clientParam.id
             }))
@@ -545,22 +556,16 @@ function Admin()
                     module:obj._id
                 }))
             }
-            arrTestModule=await (testModuleVersion.findAsync({
-                project:req.clientParam.id
-            }))
-            for(let obj of arrTestModule)
-            {
-                await (testGroupVersion.removeAsync({
-                    module:obj._id
-                }))
-            }
             await (testModule.removeAsync({
                 project:req.clientParam.id
             }))
-            await (testModuleVersion.removeAsync({
+            await (poll.removeAsync({
                 project:req.clientParam.id
             }))
-            await (poll.removeAsync({
+            await (template.removeAsync({
+                project:req.clientParam.id
+            }))
+            await (example.removeAsync({
                 project:req.clientParam.id
             }))
             await (project.removeAsync({
@@ -990,9 +995,6 @@ function Admin()
             await (test.removeAsync({
                 project:req.clientParam.id
             }))
-            await (testVersion.removeAsync({
-                project:req.clientParam.id
-            }))
             let arrTestModule=await (testModule.findAsync({
                 project:req.clientParam.id
             }))
@@ -1002,19 +1004,7 @@ function Admin()
                     module:obj._id
                 }))
             }
-            arrTestModule=await (testModuleVersion.findAsync({
-                project:req.clientParam.id
-            }))
-            for(let obj of arrTestModule)
-            {
-                await (testGroupVersion.removeAsync({
-                    module:obj._id
-                }))
-            }
             await (testModule.removeAsync({
-                project:req.clientParam.id
-            }))
-            await (testModuleVersion.removeAsync({
                 project:req.clientParam.id
             }))
             await (poll.removeAsync({
@@ -1981,6 +1971,185 @@ function Admin()
                 sort:"-date"
             }))
             util.ok(res,arr,"ok");
+        }
+        catch (err)
+        {
+            util.catch(res,err);
+        }
+    })
+    this.getSetting=async ((req,res)=>{
+        try
+        {
+            let ret={};
+            let objInfo=await (info.findOneAsync());
+            ret.info={
+                version:objInfo.version,
+                register:objInfo.register
+            }
+            ret.connect={
+                db:config.db,
+                filePath:config.filePath,
+                port:config.port
+            };
+            ret.db=objInfo.db;
+            ret.files=[];
+            if(objInfo.db.backPath)
+            {
+                ret.files=await (fs.readdirAsync(objInfo.db.backPath))
+                ret.files=ret.files.filter(function (obj) {
+                    if(obj.indexOf("@")>-1)
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                })
+                ret.files.sort(function (obj1,obj2) {
+                    if(obj1>obj2)
+                    {
+                        return -1
+                    }
+                    else if(obj1<obj2)
+                    {
+                        return 1
+                    }
+                    else
+                    {
+                        return 0;
+                    }
+                })
+                ret.files=ret.files.slice(0,10);
+            }
+            util.ok(res,ret,"ok");
+        }
+        catch (err)
+        {
+            util.catch(res,err);
+        }
+    })
+    this.setBasicInfo=async ((req,res)=>{
+        try
+        {
+            let obj=await (info.findOneAsync());
+            obj.register=req.clientParam.register;
+            await (obj.saveAsync());
+            util.ok(res,"ok")
+        }
+        catch (err)
+        {
+            util.catch(res,err);
+        }
+    })
+    this.setConnectInfo=async ((req,res)=>{
+        try
+        {
+            let obj={
+                db:req.clientParam.db,
+                filePath:req.clientParam.file,
+                port:req.clientParam.port
+            }
+            await (fs.writeFileAsync(path.join(__dirname,"../../../config.json"),JSON.stringify(obj)));
+            util.ok(res,"ok");
+        }
+        catch (err)
+        {
+            util.catch(res,err);
+        }
+    })
+    this.backup=async ((req,res)=>{
+        try
+        {
+            let obj=await (info.findOneAsync());
+            obj.db={
+                dbPath:req.clientParam.dbpath,
+                backPath:req.clientParam.backpath,
+                hours:JSON.parse(req.clientParam.hours),
+                host:req.clientParam.host,
+                name:req.clientParam.name
+            }
+            if(req.clientParam.user)
+            {
+                obj.db.user=req.clientParam.user;
+                obj.db.pass=req.clientParam.pass;
+                obj.db.authDb=req.clientParam.authdb;
+            }
+            await (obj.saveAsync());
+            if(req.clientParam.immediate)
+            {
+                await (util.backup(obj.db,obj.version))
+            }
+            util.ok(res,"ok");
+        }
+        catch (err)
+        {
+            util.catch(res,err);
+        }
+    })
+    this.restore=async ((req,res)=>{
+        try
+        {
+            let obj=await (info.findOneAsync());
+            await (util.restore(obj.db,req.clientParam.id))
+            util.ok(res,"ok");
+        }
+        catch (err)
+        {
+            util.catch(res,err);
+        }
+    })
+    this.backupList=async ((req,res)=>{
+        try
+        {
+            let ret=[];
+            let objInfo=await (info.findOneAsync());
+            if(objInfo.db.backPath)
+            {
+                ret=await (fs.readdirAsync(objInfo.db.backPath))
+                ret=ret.filter(function (obj) {
+                    if(obj.indexOf("@")>-1)
+                    {
+                        return true;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+                })
+                ret.sort(function (obj1,obj2) {
+                    if(obj1>obj2)
+                    {
+                        return -1
+                    }
+                    else if(obj1<obj2)
+                    {
+                        return 1
+                    }
+                    else
+                    {
+                        return 0;
+                    }
+                })
+                ret=ret.slice(req.clientParam.page*10,10);
+            }
+            util.ok(res,ret,"ok");
+        }
+        catch (err)
+        {
+            util.catch(res,err);
+        }
+    })
+    this.removeBackup=async ((req,res)=>{
+        try
+        {
+            let objInfo=await (info.findOneAsync());
+            let backPath=path.join(objInfo.db.backPath,req.clientParam.id);
+            if(fs.existsSync(backPath))
+            {
+                util.removeFolder(backPath);
+            }
+            util.ok(res,"ok");
         }
         catch (err)
         {

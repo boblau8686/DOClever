@@ -20,12 +20,16 @@ var window=(new dom(`...`)).window;
 var document=window.document;
 var argv=require("yargs").argv;
 var URL=require("url");
-var mockjs=require("mockjs")
+var mockjs=require("mockjs");
+var blue=require("bluebird");
+var fsAsync=blue.promisifyAll(fs);
+var child_process=blue.promisifyAll(require("child_process"));
 require("./Base64")
 var testModel=null;
-var testVersionModel=null;
 var statusModel=null;
 var statusVersionModel=null;
+var projectModel=null;
+var versionModel=null;
 var routerMap={};
 var bProduct;
 var con;
@@ -292,14 +296,47 @@ function validateParam(val,validate) {
 function  delImg(filePath) {
     if(filePath)
     {
-        fs.exists(con.filePath+filePath.replace(/\//g,path.sep),function (exist) {
-            if(exist)
+        fs.access(con.filePath+filePath.replace(/\//g,path.sep),fs.constants.F_OK,function (err) {
+            if(!err)
             {
                 fs.unlink(con.filePath+filePath);
             }
         })
     }
 }
+
+let existAsync=function (filePath) {
+    return new Promise(function (resolve) {
+        fs.access(con.filePath+filePath.replace(/\//g,path.sep),fs.constants.F_OK,function (err) {
+            if(!err)
+            {
+                resolve(1);
+            }
+            else
+            {
+                resolve(0);
+            }
+        })
+    })
+}
+
+let getFileSize=async (function (filePath) {
+    let size=0;
+    if(!filePath)
+    {
+        return size;
+    }
+    let bExist=await (existAsync(filePath));
+    if(bExist)
+    {
+        let obj=await (fsAsync.statAsync(con.filePath+filePath.replace(/\//g,path.sep)));
+        if(obj)
+        {
+            size+=obj.size;
+        }
+    }
+    return size;
+})
 
 function getIPAdress(){
     var interfaces = require('os').networkInterfaces();
@@ -997,11 +1034,11 @@ var runAfter=function (code,status,header,data) {
     }
 }
 
-var runTest=async (function (obj,baseUrl,global,test,root,opt) {
+var runTest=async (function (obj,global,test,root,opt) {
     root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]开始运行接口："+obj.name+"<br>"
     var name=obj.name
     var method=obj.method;
-    var baseUrl=obj.baseUrl=="defaultUrl"?baseUrl:obj.baseUrl;
+    var baseUrl=obj.baseUrl=="defaultUrl"?global.baseUrl:obj.baseUrl;
     var globalVar={};
     global.baseUrls.forEach(function (obj) {
         if(obj.url==baseUrl && obj.env)
@@ -1373,13 +1410,13 @@ var runTest=async (function (obj,baseUrl,global,test,root,opt) {
         })
         for(let key in objCookie)
         {
-            opt.cookie[key]=objCookie[key];
+            root.cookie[key]=objCookie[key];
         }
     }
     let strCookie="",arrCookie=[];
-    for(let key in opt.cookie)
+    for(let key in root.cookie)
     {
-        arrCookie.push(key+"="+opt.cookie[key]);
+        arrCookie.push(key+"="+root.cookie[key]);
     }
     strCookie=arrCookie.join(";");
     header["Cookie"]=strCookie
@@ -1409,7 +1446,6 @@ var runTest=async (function (obj,baseUrl,global,test,root,opt) {
             else if(obj.bodyInfo.rawType==2)
             {
                 objReq.body=body;
-                objReq.json=true;
             }
         }
     }
@@ -1454,21 +1490,33 @@ var runTest=async (function (obj,baseUrl,global,test,root,opt) {
                 let obj=realOfCookie.split("=");
                 let key=obj[0].trim();
                 let val=encodeURIComponent(obj[1]);
-                opt.cookie[key]=val;
+                root.cookie[key]=val;
             }
         }
         return res;
+    }).catch(function (err) {
+        root.output+=err.message+"<br>";
+        root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]结束运行接口："+obj.name+"(耗时：<span style='color: green'>"+(((new Date())-startDate)/1000).toFixed(3)+"秒</span>)<br>"
+        return {
+            status:200,
+            header:{},
+            data:err
+        }
     })
 })
 
-var runTestCode=async (function (code,test,global,opt,root) {
+var runTestCode=async (function (code,test,global,opt,root,argv,mode) {
     if(!testModel)
     {
         testModel=require("../model/testModel");
     }
-    if(!testVersionModel)
+    if(!projectModel)
     {
-        testVersionModel=require("../model/testVersionModel");
+        projectModel=require("../model/projectModel");
+    }
+    if(!versionModel)
+    {
+        versionModel=require("../model/versionModel");
     }
     var Base64=BASE64.encoder,MD5=CryptoJS.MD5,SHA1=CryptoJS.SHA1,SHA256=CryptoJS.SHA256,SHA512=CryptoJS.SHA512,SHA3=CryptoJS.SHA3,RIPEMD160=CryptoJS.RIPEMD160,AES=CryptoJS.AES.encrypt,TripleDES=CryptoJS.TripleDES.encrypt,DES=CryptoJS.DES.encrypt,Rabbit=CryptoJS.Rabbit.encrypt,RC4=CryptoJS.RC4.encrypt,RC4Drop=CryptoJS.RC4Drop.encrypt;
     if(!global)
@@ -1476,20 +1524,9 @@ var runTestCode=async (function (code,test,global,opt,root) {
         global={};
     }
     var env={};
-    if(!opt.cookie)
+    if(!root.cookie)
     {
-        opt.cookie={};
-    }
-    if(opt.baseUrls && opt.baseUrl)
-    {
-        opt.baseUrls.forEach(function (obj) {
-            if(obj.url==opt.baseUrl && obj.env)
-            {
-                obj.env.forEach(function (obj) {
-                    env[obj.key]=obj.value;
-                })
-            }
-        })
+        root.cookie={};
     }
     function log(text) {
         if(typeof(text)=="object")
@@ -1509,12 +1546,73 @@ var runTestCode=async (function (code,test,global,opt,root) {
         var text;
         if(type=="1")
         {
-            text="(function (opt) {return runTest("+obj.replace(/\r|\n/g,"")+",'"+opt.baseUrl+"',"+"{before:'"+opt.before.replace(/'/g,"\\'").replace(/\r|\n/g,";")+"',after:'"+opt.after.replace(/'/g,"\\'").replace(/\r|\n/g,";")+"',baseUrls:"+JSON.stringify(opt.baseUrls)+",cookie:"+JSON.stringify(opt.cookie).replace(/'/g,"\\'")+"}"+",test,root,opt)})"
+            let objInfo={};
+            let o=JSON.parse(obj);
+            let query={
+                project:o.project._id
+            }
+            if(o.version)
+            {
+                query.version=o.version;
+            }
+            let bFind=false;
+            for(let j=0;j<root.projectInfo.length;j++)
+            {
+                let objProjectInfo=root.projectInfo[j];
+                if(objProjectInfo.project==query.project && objProjectInfo.version==query.version)
+                {
+                    objInfo=objProjectInfo;
+                    bFind=true;
+                    break;
+                }
+            }
+            if(!bFind)
+            {
+                objInfo=await (projectModel.findOneAsync({
+                    _id:query.project
+                },"baseUrls after before"));
+                if(!objInfo)
+                {
+                    objInfo={
+                        baseUrls:[],
+                        before:"",
+                        after:""
+                    }
+                }
+                if(query.version)
+                {
+                    let objVersion=await (versionModel.findOneAsync({
+                        _id:query.version
+                    },"baseUrls after before"));
+                    if(!objVersion)
+                    {
+                        continue;
+                    }
+                    objInfo=objVersion;
+                }
+                let objPush={
+                    baseUrls:objInfo.baseUrls,
+                    before:objInfo.before,
+                    after:objInfo.after,
+                    project:query.project
+                }
+                if(query.version)
+                {
+                    objPush.version=query.version;
+                }
+                root.projectInfo.push(objPush);
+            }
+            opt.baseUrls=objInfo.baseUrls;
+            opt.before=objInfo.before;
+            opt.after=objInfo.after;
+            text="(function (opt1) {return runTest("+obj.replace(/\r|\n/g,"")+",opt,test,root,opt1)})"
         }
         else if(type=="2")
         {
-            var testObj;
-            testObj=await (testModel.findOneAsync({
+            var testObj,testMode=arr[i].hasAttribute("mode")?arr[i].getAttribute("mode"):"code";
+            testObj=await (testModel.findOneAsync(obj.length==24?{
+                _id:obj
+            }:{
                 id:obj
             },null,{
                 populate:{
@@ -1524,16 +1622,31 @@ var runTestCode=async (function (code,test,global,opt,root) {
             }))
             if(!testObj)
             {
-                throw "测试用例已不存在";
+                testObj={
+                    code:"",
+                    ui:[],
+                    name:"",
+                    status:0
+                }
             }
             testObj=await (testModel.populateAsync(testObj,{
                 path:"group",
                 select:"name"
             }))
-            text="(function () {return runTestCode('"+testObj.code.replace(/\\\&quot\;/g,"\\\\&quot;").replace(/'/g,"\\'")+"',"+JSON.stringify(testObj)+",global,"+JSON.stringify(opt)+",root)})"
+            var code;
+            if(testMode=="code")
+            {
+                code=testObj.code.replace(/\\\&quot\;/g,"\\\\&quot;").replace(/'/g,"\\'");
+            }
+            else
+            {
+                code=convertToCode(testObj.ui).replace(/'/g,"\\'").replace(/\\\"/g,"\\\\\"");
+            }
+            text="(function () {var argv=Array.prototype.slice.call(arguments);return runTestCode('"+code+"',"+JSON.stringify(testObj)+",global,opt,root,argv,'"+testMode+"')})"
         }
         else
         {
+            arrNode.push(undefined);
             continue;
         }
         var node=document.createTextNode(text);
@@ -1545,7 +1658,14 @@ var runTestCode=async (function (code,test,global,opt,root) {
     arrNode.forEach(function (obj) {
         obj.oldNode.parentNode.replaceChild(obj.newNode,obj.oldNode);
     })
-    root.output+="<br><div style='background-color: #ececec'>["+moment().format("YYYY-MM-DD HH:mm:ss")+"]开始执行用例："+test.module.name+"/"+test.group.name+"/"+test.name+"<br>";
+    if(test.module)
+    {
+        root.output+="<br><div style='background-color: #ececec'>["+moment().format("YYYY-MM-DD HH:mm:ss")+"]开始执行用例："+test.module.name+"/"+test.group.name+"/"+test.name+"("+(mode=="code"?"代码模式":"UI模式")+")<br>";
+    }
+    else
+    {
+        root.output+="<br><div style='background-color: #ececec'>["+moment().format("YYYY-MM-DD HH:mm:ss")+"]开始执行轮询<br>";
+    }
     var text=ele.textContent.replace(new RegExp(decodeURIComponent("%C2%A0"),"g")," ");
     function bOutside(str) {
         var a1=0,a2=0;
@@ -1586,7 +1706,7 @@ var runTestCode=async (function (code,test,global,opt,root) {
                     if(index>-1)
                     {
                         lText=text.substring(0,index);
-                        if(bOutside(evalText+lText))
+                        if(bOutside(evalText+lText) && !lText.endsWith("var argv=Array.prototype.slice.call(arguments"))
                         {
                             evalText+=lText+"));";
                             text=text.substr(index+2);
@@ -1618,26 +1738,145 @@ var runTestCode=async (function (code,test,global,opt,root) {
         }
     }
     var ret=eval("(async (function () {"+evalText+"}))()").then(function (ret) {
-        if(ret===undefined)
+        var obj={
+            argv:[]
+        };
+        var temp;
+        if(typeof(ret)=="object" && (ret instanceof Array))
         {
-            test.status=0;
-            root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]用例执行结束："+test.module.name+"/"+test.group.name+"/"+test.name+"(未判定)";
-        }
-        else if(Boolean(ret)==true)
-        {
-            test.status=1;
-            root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]用例执行结束："+test.module.name+"/"+test.group.name+"/"+test.name+"(<span style='color:green'>已通过</span>)";
+            temp=ret[0];
+            obj.argv=ret.slice(1);
         }
         else
         {
+            temp=ret;
+        }
+        if(temp===undefined)
+        {
+            obj.pass=undefined;
+            test.status=0;
+            if(test.module)
+            {
+                root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]用例执行结束："+test.module.name+"/"+test.group.name+"/"+test.name+"(未判定)";
+            }
+            else
+            {
+                root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]轮询执行结束";
+            }
+        }
+        else if(Boolean(temp)==true)
+        {
+            obj.pass=true;
+            test.status=1;
+            if(test.module)
+            {
+                root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]用例执行结束："+test.module.name+"/"+test.group.name+"/"+test.name+"(<span style='color:green'>已通过</span>)";
+            }
+            else
+            {
+                root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]轮询执行结束";
+            }
+        }
+        else
+        {
+            obj.pass=false;
             test.status=2;
-            root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]用例执行结束："+test.module.name+"/"+test.group.name+"/"+test.name+"(<span style='color:red'>未通过</span>)";
+            if(test.module)
+            {
+                root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]用例执行结束："+test.module.name+"/"+test.group.name+"/"+test.name+"(<span style='color:red'>未通过</span>)";
+            }
+            else
+            {
+                root.output+="["+moment().format("YYYY-MM-DD HH:mm:ss")+"]轮询执行结束";
+            }
         }
         root.output+="</div><br>"
-        return ret;
+        return obj;
     });
     return ret;
 })
+
+function convertToCode(data) {
+    var str="";
+    data.forEach(function (obj) {
+        if(obj.type=="interface")
+        {
+            var argv="{";
+            for(var key in obj.argv)
+            {
+                argv+=key+":{";
+                for(var key1 in obj.argv[key])
+                {
+                    argv+=key1+":"+obj.argv[key][key1]+","
+                }
+                argv+="},"
+            }
+            argv+="}"
+            str+=`<div class='testCodeLine'>var $${obj.id}=await <a href='javascript:void(0)' style='cursor: pointer; text-decoration: none;' type='1' varid='${obj.id}' data='${obj.data.replace(/\'/g,"&apos;")}'>${obj.name}</a>(${argv});</div>`
+        }
+        else if(obj.type=="test")
+        {
+            var argv="[";
+            obj.argv.forEach(function (obj) {
+                argv+=obj+","
+            })
+            argv+="]";
+            str+=`<div class='testCodeLine'>var $${obj.id}=await <a type='2' href='javascript:void(0)' style='cursor: pointer; text-decoration: none;' varid='${obj.id}' data='${obj.data}' mode='${obj.mode}'>${obj.name}</a>(...${argv});</div>`
+        }
+        else if(obj.type=="ifbegin")
+        {
+            str+=`<div class='testCodeLine'>if(${obj.data}){</div>`
+        }
+        else if(obj.type=="elseif")
+        {
+            str+=`<div class='testCodeLine'>}else if(${obj.data}){</div>`
+        }
+        else if(obj.type=="else")
+        {
+            str+=`<div class='testCodeLine'>}else{</div>`
+        }
+        else if(obj.type=="ifend")
+        {
+            str+=`<div class='testCodeLine'>}</div>`
+        }
+        else if(obj.type=="var")
+        {
+            if(obj.global)
+            {
+                str+=`<div class='testCodeLine'>global["${obj.name}"]=${obj.data};</div>`
+            }
+            else
+            {
+                str+=`<div class='testCodeLine'>var ${obj.name}=${obj.data};</div>`
+            }
+        }
+        else if(obj.type=="return")
+        {
+            if(obj.argv.length>0)
+            {
+                var argv=obj.argv.join(",");
+                str+=`<div class='testCodeLine'>return [${obj.data},${argv}];</div>`
+            }
+            else
+            {
+                str+=`<div class='testCodeLine'>return ${obj.data};</div>`
+            }
+        }
+        else if(obj.type=="log")
+        {
+            str+=`<div class='testCodeLine'>log(${obj.data});</div>`
+        }
+        else if(obj.type=="input")
+        {
+            str+=`<div class='testCodeLine'>var $${obj.id}=await input("${obj.name}",${obj.data});</div>`
+        }
+        else if(obj.type=="baseurl")
+        {
+            str+=`<div class='testCodeLine'>opt["baseUrl"]=${obj.data};</div>`
+        }
+    })
+    return str;
+}
 
 function sendMail(smtp,port,user,pass,to,subject,content) {
     let transporter = mail.createTransport({
@@ -1724,7 +1963,7 @@ var init=async (function () {
                     })
                 })
             }
-            let arr=["请输入mongodb数据库地址（比如：mongodb://localhost:27017/DOClever)：","请输入DOClever上传文件路径（比如：/Users/Shared/DOClever）：","请输入DOClever上传图片文件路径（需要是上传文件路径的直接子目录，比如：/Users/Shared/DOClever/img）：","请输入DOClever上传临时文件路径（需要是上传文件路径的直接子目录，比如：/Users/Shared/DOClever/temp）：","请输入端口号（比如10000）："];
+            let arr=["请输入mongodb数据库地址（比如：mongodb://localhost:27017/DOClever)：","请输入DOClever上传文件路径（比如：/Users/Shared/DOClever）：","请输入端口号（比如10000）："];
             for(let i=0;i<arr.length;i++)
             {
                 let val=await (question(arr[i]));
@@ -1761,11 +2000,13 @@ var init=async (function () {
                     }
                     con.db=val;
                 }
-                else if(i==1 || i==2 || i==3)
+                else if(i==1)
                 {
                     try
                     {
-                        createDir(val)
+                        createDir(val);
+                        createDir(path.join(val,"img"));
+                        createDir(path.join(val,"temp"));
                     }
                     catch (err)
                     {
@@ -1773,20 +2014,9 @@ var init=async (function () {
                         i--;
                         continue;
                     }
-                    if(i==1)
-                    {
-                        con.filePath=val;
-                    }
-                    else if(i==2)
-                    {
-                        con.imgPath=val;
-                    }
-                    else if(i==3)
-                    {
-                        con.tempPath=val;
-                    }
+                    con.filePath=val;
                 }
-                else if(i==4)
+                else if(i==2)
                 {
                     con.port=parseInt(val);
                 }
@@ -1803,6 +2033,9 @@ var init=async (function () {
         else
         {
             con=require("../../config.json");
+            createDir(con.filePath);
+            createDir(path.join(con.filePath,"img"));
+            createDir(path.join(con.filePath,"temp"));
         }
         if(argv.db)
         {
@@ -1820,32 +2053,6 @@ var init=async (function () {
                 process.exit(0);
             }
             con.filePath=argv.file;
-        }
-        if(argv.img)
-        {
-            try
-            {
-                createDir(argv.img)
-            }
-            catch (err)
-            {
-                console.log(err);
-                process.exit(0);
-            }
-            con.imgPath=argv.img;
-        }
-        if(argv.temp)
-        {
-            try
-            {
-                createDir(argv.temp)
-            }
-            catch (err)
-            {
-                console.log(err);
-                process.exit(0);
-            }
-            con.tempPath=argv.temp;
         }
         if(argv.port)
         {
@@ -2243,6 +2450,8 @@ let runPoll=async (function (arr) {
     let poll=require("../model/pollModel");
     let test=require("../model/testModel");
     let user=require("../model/userModel");
+    let testCollection=require("../model/testCollectionModel");
+    let project=require("../model/projectModel");
     arr=await (poll.populateAsync(arr,{
         path:"project"
     }));
@@ -2254,63 +2463,74 @@ let runPoll=async (function (arr) {
     }));
     for(let obj of arr)
     {
+        let objCollection=await (testCollection.findOneAsync({
+            poll:obj._id
+        }))
+        if(!objCollection)
+        {
+            continue;
+        }
         let root={
             output:"",
-            count:obj.test.length,
+            count:objCollection.tests.length,
             success:0,
             fail:0,
-            unknown:0
+            unknown:0,
+            projectInfo:[]
         };
-        for(let obj1 of obj.test)
+        let env={};
+        if(obj.interProject)
         {
-            obj1=await (test.populateAsync(obj1,{
-                path:"module"
-            }))
-            obj1=await (test.populateAsync(obj1,{
-                path:"group"
-            }))
-            let global={
+            let objProject=await (project.findOneAsync({
+                _id:obj.interProject
+            },"baseUrls"))
+            if(objProject)
+            {
+                objProject.baseUrls.forEach(function (obj) {
+                    if(obj.url==objCollection.baseUrl && obj.env)
+                    {
+                        obj.env.forEach(function (obj) {
+                            env[obj.key]=obj.value;
+                        })
+                    }
+                })
+            }
+        }
+        let arrTest=objCollection.tests.map(function (obj) {
+            return {
+                type:"test",
+                data:obj.test,
+                mode:obj.mode,
+                id:obj.id,
+                name:"aa",
+                argv:obj.argv,
+            }
+        })
+        let  str=convertToCode(arrTest);
+        try
+        {
+            await (exports.runTestCode(str,{
+                name:"",
+                status:0
+            },{},{
                 baseUrl:obj.baseUrl,
-                before:obj.project.before,
-                after:obj.project.after,
-                baseUrls:obj.project.baseUrls
-            }
-            if(typeof (obj.version)=="object")
-            {
-                global.before=obj.version.before;
-                global.after=obj.version.after;
-                global.baseUrls=obj.version.baseUrls;
-            }
-            try
-            {
-                let ret=await (exports.runTestCode(obj1.code,obj1,{},global,root))
-                if(ret===undefined)
-                {
-                    root.unknown++;
-                }
-                else if(Boolean(ret)==true)
-                {
-                    root.success++;
-                }
-                else
-                {
-                    root.fail++;
-                }
-            }
-            catch (err)
-            {
-                root.output+=err+"<br>"
-            }
+                env:env,
+            },root,[],"ui"));
+        }
+        catch(e)
+        {
+            root.fail++;
+            root.output+=e+"<br>"
         }
         if(obj.failSend && root.fail==0 && root.unknown==0)
         {
             return;
         }
-        var arrPollUser=obj.users.map(function (obj) {
+        let arrPollUser=obj.users.map(function (obj) {
             return obj.toString();
         });
-        var arrProjectUser=obj.project.users.map(function (obj) {
-            return obj.user.toString();
+        let arrProjectUser=obj.project.users.map(function (obj) {
+            return obj.toString();
         })
         arrProjectUser.unshift(obj.project.owner.toString());
         let arr=[],arrUser=[];
@@ -2491,6 +2711,123 @@ var createStatistic=async (function() {
     await (statistic.createAsync(obj));
 })
 
+var formatJson = function (json, options) {
+    var reg = null,
+        formatted = '',
+        pad = 0,
+        PADDING = '    ';
+    options = options || {};
+    options.newlineAfterColonIfBeforeBraceOrBracket = (options.newlineAfterColonIfBeforeBraceOrBracket === true) ? true : false;
+    options.spaceAfterColon = (options.spaceAfterColon === false) ? false : true;
+    if (typeof json !== 'string') {
+        json = JSON.stringify(json);
+    } else {
+        json = JSON.parse(json);
+        json = JSON.stringify(json);
+    }
+    reg = /([\{\}])/g;
+    json = json.replace(reg, '\r\n$1\r\n');
+    reg = /([\[\]])/g;
+    json = json.replace(reg, '\r\n$1\r\n');
+    reg = /(\,)/g;
+    json = json.replace(reg, '$1\r\n');
+    reg = /(\r\n\r\n)/g;
+    json = json.replace(reg, '\r\n');
+    reg = /\r\n\,/g;
+    json = json.replace(reg, ',');
+    if (!options.newlineAfterColonIfBeforeBraceOrBracket) {
+        reg = /\:\r\n\{/g;
+        json = json.replace(reg, ':{');
+        reg = /\:\r\n\[/g;
+        json = json.replace(reg, ':[');
+    }
+    if (options.spaceAfterColon) {
+        reg = /\:/g;
+        json = json.replace(reg, ':');
+    }
+    (json.split('\r\n')).forEach(function (node, index) {
+            var i = 0,
+                indent = 0,
+                padding = '';
+
+            if (node.match(/\{$/) || node.match(/\[$/)) {
+                indent = 1;
+            } else if (node.match(/\}/) || node.match(/\]/)) {
+                if (pad !== 0) {
+                    pad -= 1;
+                }
+            } else {
+                indent = 0;
+            }
+
+            for (i = 0; i < pad; i++) {
+                padding += PADDING;
+            }
+
+            formatted += padding + node + '\r\n';
+            pad += indent;
+        }
+    );
+    return formatted;
+};
+
+var backup=async (function (db,version) {
+    if(!db.dbPath || !db.host || !db.name || !db.backPath)
+    {
+        return
+    }
+    let fileName="mongodump";
+    if(path.sep=="\\")
+    {
+        fileName+=".exe";
+    }
+    let date=moment().format("YYYYMMDDHHmmss");
+    db.dbPath=path.join(db.dbPath,fileName);
+    db.backPath=path.join(db.backPath,`${version}@${date}`)
+    let str=`${db.dbPath} -h ${db.host} -d ${db.name} -o ${db.backPath}`;
+    if(db.user && db.pass && db.authDb)
+    {
+        str+=` -u ${db.user} -p ${db.pass} --authenticationDatabase ${db.authDb}`
+    }
+    await (child_process.execAsync(str));
+})
+
+var restore=async (function (db,dir) {
+    if(!db.dbPath || !db.host || !db.name || !db.backPath)
+    {
+        return
+    }
+    let fileName="mongorestore";
+    if(path.sep=="\\")
+    {
+        fileName+=".exe";
+    }
+    db.dbPath=path.join(db.dbPath,fileName);
+    db.backPath=path.join(db.backPath,dir,db.name)
+    let str=`${db.dbPath} -h ${db.host} -d ${db.name} ${db.backPath} --drop`;
+    if(db.user && db.pass && db.authDb)
+    {
+        str+=` -u ${db.user} -p ${db.pass} --authenticationDatabase ${db.authDb}`
+    }
+    await (child_process.execAsync(str));
+})
+
+var removeFolder=function (path) {
+    var files = [];
+    if(fs.existsSync(path)) {
+        files = fs.readdirSync(path);
+        files.forEach(function(file, index) {
+            var curPath = path + "/" + file;
+            if(fs.statSync(curPath).isDirectory()) {
+                removeFolder(curPath);
+            } else {
+                fs.unlinkSync(curPath);
+            }
+        });
+        fs.rmdirSync(path);
+    }
+};
+
 exports.err=err;
 exports.ok=ok;
 exports.dateDiff=dateDiff;
@@ -2524,3 +2861,8 @@ exports.handleGlobalVar=handleGlobalVar;
 exports.getPostmanGlobalVar=getPostmanGlobalVar
 exports.getNowFormatDate=getNowFormatDate
 exports.createStatistic=createStatistic
+exports.formatJson=formatJson
+exports.backup=backup;
+exports.restore=restore;
+exports.removeFolder=removeFolder;
+exports.getFileSize=getFileSize;

@@ -429,7 +429,7 @@ var interface=[
 
         },
         user:1,
-        handle:[project.validateUser,project.getUsers]
+        handle:[project.inProject,project.getUsers]
     },
     {
         "method":"POST",
@@ -514,7 +514,21 @@ var interface=[
         },
         user:1,
         handle:[project.importPostman]
-    }
+    },
+    {
+        "method":"GET",
+        "path":"/project/exportdocx",
+        "param": {
+            id:{
+                type:String
+            },
+        },
+        "data":{
+
+        },
+        user:1,
+        handle:[project.inProject,project.exportDocx]
+    },
 ];
 
 module.exports=interface;

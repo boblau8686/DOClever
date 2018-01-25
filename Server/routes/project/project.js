@@ -13,14 +13,8 @@ var groupVersion=require("../../model/groupVersionModel")
 var interfaceVersion=require("../../model/interfaceVersionModel")
 var interfaceSnapshot=require("../../model/interfaceSnapshotModel")
 var statusVersion=require("../../model/statusVersionModel")
-var testVersion=require("../../model/testVersionModel")
-var testModuleVersion=require("../../model/testModuleVersionModel")
-var testGroupVersion=require("../../model/testGroupVersionModel")
 var interface=require("../../model/interfaceModel")
 var status=require("../../model/statusModel")
-var test=require("../../model/testModel")
-var testModule=require("../../model/testModuleModel")
-var testGroup=require("../../model/testGroupModel")
 var temp=require("../../model/tempModel")
 var team=require("../../model/teamModel")
 var teamGroup=require("../../model/teamGroupModel")
@@ -29,6 +23,8 @@ var message=require("../../model/messageModel");
 var version=require("../../model/versionModel")
 var poll=require("../../model/pollModel")
 var article=require("../../model/articleModel")
+var template=require("../../model/templateModel")
+var example=require("../../model/exampleModel")
 var blue=require("bluebird");
 var fs=require("fs");
 var uuid=require("uuid/v1");
@@ -39,6 +35,7 @@ var rm=require("rimraf");
 var nunjucks=require("nunjucks");
 var moment=require("moment");
 var request=require("../../third/requestAsync");
+var office=require("officegen");
 blue.promisifyAll(fs);
 
 function Project() {
@@ -127,9 +124,6 @@ function Project() {
             req.interfaceModel=interface;
             req.groupModel=group;
             req.statusModel=status;
-            req.testModuleModel=testModule;
-            req.testGroupModel=testGroup;
-            req.testModel=test;
             if(req.headers["docleverversion"])
             {
                 req.version=await (version.findOneAsync({
@@ -142,9 +136,6 @@ function Project() {
                 req.interfaceModel=interfaceVersion;
                 req.groupModel=groupVersion;
                 req.statusModel=statusVersion;
-                req.testModuleModel=testModuleVersion;
-                req.testGroupModel=testGroupVersion;
-                req.testModel=testVersion;
             }
             if(req.clientParam.id)
             {
@@ -224,9 +215,6 @@ function Project() {
             req.interfaceModel=interface;
             req.groupModel=group;
             req.statusModel=status;
-            req.testModuleModel=testModule;
-            req.testGroupModel=testGroup;
-            req.testModel=test;
             if(req.headers["docleverversion"])
             {
                 req.version=await (version.findOneAsync({
@@ -239,9 +227,6 @@ function Project() {
                 req.interfaceModel=interfaceVersion;
                 req.groupModel=groupVersion;
                 req.statusModel=statusVersion;
-                req.testModuleModel=testModuleVersion;
-                req.testGroupModel=testGroupVersion;
-                req.testModel=testVersion;
             }
             let obj=await (project.findOneAsync({
                 _id:req.clientParam.id,
@@ -278,13 +263,13 @@ function Project() {
                             }
                         }
                     }))
-                    if(arrUser.length==0 && !obj.public)
+                    if(arrUser.length==0 && !obj.public && !req.headers["referer"].endsWith("public/public.html"))
                     {
                         util.throw(e.userForbidden,"你没有权限");
                         return;
                     }
                 }
-                else if(!obj.public)
+                else if(!obj.public && !req.headers["referer"].endsWith("public/public.html"))
                 {
                     util.throw(e.userForbidden,"你没有权限");
                     return;
@@ -494,8 +479,6 @@ function Project() {
         try
         {
             let obj={},ret=[];
-            obj.project={};
-            obj.team={};
             let arr=await (project.findAsync({
                 owner:req.userInfo._id,
                 team:{
@@ -530,7 +513,7 @@ function Project() {
                     project:obj._id
                 }))
             }
-            obj.project.create=arr;
+            obj.create=arr;
             arr=await (project.findAsync({
                 users:{
                     $elemMatch:{
@@ -589,7 +572,7 @@ function Project() {
                     project:obj._id
                 }))
             }
-            obj.project.join=ret;
+            obj.join=ret;
             arr=await (project.findAsync({
                 owner:{
                     $ne:req.userInfo._id
@@ -627,108 +610,7 @@ function Project() {
                     project:obj._id
                 }))
             }
-            obj.project.public=arr;
-            arr=await (team.findAsync({
-                owner:req.userInfo._id
-            },"",{
-                sort:"-createdAt"
-            }))
-            arr.forEach(function (obj) {
-                obj._doc.role=0;
-                obj._doc.own=1;
-            })
-            for(let obj of arr)
-            {
-                let arr1=await (teamGroup.findAsync({
-                    team:obj._id
-                }))
-                let count=0;
-                for(let o of arr1)
-                {
-                    count+=o.users.length;
-                }
-                obj._doc.userCount=count;
-                obj._doc.projectCount=await (project.countAsync({
-                    team:obj._id
-                }))
-            }
-            obj.team.create=arr;
-            let arrTemp=await (teamGroup.findAsync({
-                users:{
-                    $elemMatch:{
-                        user:req.userInfo._id,
-                        role:0
-                    }
-                }
-            },"",{
-                sort:"-createdAt"
-            }))
-            let arrTeam=[];
-            for(let obj of arrTemp)
-            {
-                if(arrTeam.indexOf(obj.team.toString())==-1)
-                {
-                    arrTeam.push(obj.team);
-                }
-            }
-            arr=await (team.findAsync({
-                _id:{
-                    $in:arrTeam
-                }
-            },"",{
-                sort:"-createdAt"
-            }))
-            arr.forEach(function (obj) {
-                obj._doc.own=0;
-                obj._doc.role=0;
-            })
-            ret=arr;
-            arrTemp=await (teamGroup.findAsync({
-                users:{
-                    $elemMatch:{
-                        user:req.userInfo._id,
-                        role:1
-                    }
-                }
-            },"",{
-                sort:"-createdAt"
-            }))
-            arrTeam=[];
-            for(let obj of arrTemp)
-            {
-                if(arrTeam.indexOf(obj.team.toString())==-1)
-                {
-                    arrTeam.push(obj.team);
-                }
-            }
-            arr=await (team.findAsync({
-                _id:{
-                    $in:arrTeam
-                }
-            },"",{
-                sort:"-createdAt"
-            }))
-            arr.forEach(function (obj) {
-                obj._doc.own=0;
-                obj._doc.role=1;
-            })
-            ret=ret.concat(arr);
-            for(let obj of ret)
-            {
-                let arr=await (teamGroup.findAsync({
-                    team:obj._id
-                }))
-                let count=0;
-                for(let o of arr)
-                {
-                    count+=o.users.length;
-                }
-                obj._doc.userCount=count;
-                obj._doc.projectCount=await (project.countAsync({
-                    team:obj._id
-                }))
-            }
-            obj.team.join=ret;
+            obj.public=arr;
             util.ok(res,obj,"ok");
         }
         catch (err)
@@ -1004,7 +886,7 @@ function Project() {
             },null,{
                 populate:{
                     path:"users.user",
-                    select:"-password"
+                    select:"-password -question -answer"
                 }
             }))
             if(req.version)
@@ -1062,13 +944,20 @@ function Project() {
                 query.version=req.headers["docleverversion"]
             }
             let obj=await (req.groupModel.findOneAsync(query));
-            await (req.interfaceModel.removeAsync({
+            let arr=await  (req.interfaceModel.findAsync({
                 group:obj._id
-            }));
+            }))
+            for(let o of arr)
+            {
+                await (example.removeAsync({
+                    interface:o._id
+                }))
+                await (o.removeAsync());
+            }
             await (interfaceSnapshot.removeAsync({
                 group:obj._id
             }));
-            let arr=await (this.getChild(req,req.clientParam.id,null,1));
+            arr=await (this.getChild(req,req.clientParam.id,null,1));
             util.ok(res,arr,"ok");
         }
         catch (err)
@@ -1104,37 +993,13 @@ function Project() {
             await (statusVersion.removeAsync({
                 project:req.clientParam.id
             }))
-            await (test.removeAsync({
-                project:req.clientParam.id
-            }))
-            await (testVersion.removeAsync({
-                project:req.clientParam.id
-            }))
-            let arrTestModule=await (testModule.findAsync({
-                project:req.clientParam.id
-            }))
-            for(let obj of arrTestModule)
-            {
-                await (testGroup.removeAsync({
-                    module:obj._id
-                }))
-            }
-            arrTestModule=await (testModuleVersion.findAsync({
-                project:req.clientParam.id
-            }))
-            for(let obj of arrTestModule)
-            {
-                await (testGroupVersion.removeAsync({
-                    module:obj._id
-                }))
-            }
-            await (testModule.removeAsync({
-                project:req.clientParam.id
-            }))
-            await (testModuleVersion.removeAsync({
-                project:req.clientParam.id
-            }))
             await (poll.removeAsync({
+                project:req.clientParam.id
+            }))
+            await (template.removeAsync({
+                project:req.clientParam.id
+            }))
+            await (example.removeAsync({
                 project:req.clientParam.id
             }))
             await (project.removeAsync({
@@ -1154,7 +1019,7 @@ function Project() {
             let obj=await (project.findOneAsync({
                 _id:req.clientParam.id
             }));
-            if(obj.owner.toString()==req.clientParam.id)
+            if(obj.owner.toString()==req.userInfo._id.toString())
             {
                 util.throw(e.userForbidden,"创建的项目不能退出");
             }
@@ -1272,38 +1137,20 @@ function Project() {
             {
                 query.version=req.headers["docleverversion"]
             }
-            obj.global.status=await (req.statusModel.findAsync(query,"-_id -project"));
-            obj.test=[];
+            obj.global.status=await (req.statusModel.findAsync(query,"-_id -project -version"));
+            if(!query.version)
+            {
+                query.version={
+                    $exists:false
+                }
+            }
+            obj.global.template=await (template.findAsync(query,"-_id -project -version"))
             query={
                 project:req.obj._id
             }
             if(req.headers["docleverversion"])
             {
                 query.version=req.headers["docleverversion"]
-            }
-            let arrTestModule=await (req.testModuleModel.findAsync(query));
-            for(let objTestModule of arrTestModule)
-            {
-                let o={
-                    name:objTestModule.name,
-                    id:objTestModule.id,
-                    data:[]
-                };
-                let arrTestGroup=await (req.testGroupModel.findAsync({
-                    module:objTestModule._id
-                }));
-                for(let objTestGroup of arrTestGroup)
-                {
-                    let o1={
-                        name:objTestGroup.name,
-                        id:objTestGroup.id,
-                        data:(await (req.testModel.findAsync({
-                            group:objTestGroup._id
-                        },"-_id -project -module -group -owner -editor -createdAt -updatedAt")))
-                    }
-                    o.data.push(o1);
-                }
-                obj.test.push(o);
             }
             let getChild=async (function(req,obj) {
                 let query={
@@ -1434,31 +1281,12 @@ function Project() {
                     await (status.createAsync(item));
                 }
             }
-            if(obj.test.length>0)
+            if(obj.global.template && obj.global.template.length>0)
             {
-                for(let obj1 of obj.test)
+                for(let item of obj.global.template)
                 {
-                    let objTestModule=await (testModule.createAsync({
-                        name:obj1.name,
-                        id:obj1.id,
-                        project:objProject._id
-                    }))
-                    for(let obj2 of obj1.data)
-                    {
-                        let objTestGroup=await (testGroup.createAsync({
-                            name:obj2.name,
-                            id:obj2.id,
-                            module:objTestModule._id
-                        }))
-                        for(let obj3 of obj2.data)
-                        {
-                            obj3.project=objProject._id;
-                            obj3.module=objTestModule._id;
-                            obj3.group=objTestGroup._id;
-                            obj3.editor=obj3.owner=req.userInfo._id;
-                            await (test.createAsync(obj3));
-                        }
-                    }
+                    item.project=objProject._id;
+                    await (template.createAsync(item));
                 }
             }
             let bTrash=false,interfaceCount=0;
@@ -1752,7 +1580,7 @@ function Project() {
             }))
             for(let obj of arr)
             {
-                let pathName=path.join(con.tempPath,obj.name+".zip");
+                let pathName=path.join(con.filePath,"temp",obj.name+".zip");
                 if(await (fs.existsAsync(pathName)))
                 {
                     await (fs.unlinkAsync(pathName));
@@ -1765,7 +1593,7 @@ function Project() {
                 user:req.userInfo._id,
                 project:req.obj._id,
             }))
-            await (copy(path.resolve(__dirname,"../../html"),path.join(con.tempPath,name)));
+            await (copy(path.resolve(__dirname,"../../html"),path.join(con.filePath,"temp",name)));
             let query={
                 project:req.obj._id
             }
@@ -1852,29 +1680,29 @@ function Project() {
                     creator:obj.creator
                 }
             });
-            nunjucks.configure(path.join(con.tempPath,name), {  });
+            nunjucks.configure(path.join(con.filePath,"temp",name), {  });
             var str=nunjucks.render("index.html",{
                 interface:JSON.stringify(arrGroup),
                 project:JSON.stringify(req.obj),
                 status:JSON.stringify(arrStatus),
                 name:req.obj.name
             })
-            await (fs.writeFileAsync(path.join(con.tempPath,name,"index.html"),str));
-            var pathName=path.join(con.tempPath,name+".zip");
+            await (fs.writeFileAsync(path.join(con.filePath,"temp",name,"index.html"),str));
+            var pathName=path.join(con.filePath,"temp",name+".zip");
             var output=fs.createWriteStream(pathName);
             var archive = zip('zip', {
                 zlib: { level: 9 }
             });
             output.on('close', function() {
-                rm(path.join(con.tempPath,name),{},function (err) {
+                rm(path.join(con.filePath,"temp",name),{},function (err) {
 
                 });
                 res.download(pathName,req.obj.name+".zip",function (err) {
                     if(!err)
                     {
                         obj.removeAsync();
-                        fs.exists(pathName,function (exist) {
-                            if(exist)
+                        fs.access(pathName,fs.constants.F_OK,function (err) {
+                            if(!err)
                             {
                                 fs.unlink(pathName);
                             }
@@ -1883,13 +1711,13 @@ function Project() {
                 });
             });
             archive.on('error', function(err) {
-                rm(path.join(con.tempPath,name),{},function (err) {
+                rm(path.join(con.filePath,"temp",name),{},function (err) {
 
                 });
                 throw err;
             });
             archive.pipe(output);
-            archive.directory(path.join(con.tempPath,name),req.obj.name);
+            archive.directory(path.join(con.filePath,"temp",name),req.obj.name);
             archive.finalize();
         }
         catch (err)
@@ -2082,8 +1910,8 @@ function Project() {
                     await (objProject.saveAsync());
                 }
                 await (message.createAsync({
-                    name:req.clientParam.state==1?"您已同意项目加入团队":"您已拒绝项目加入团队",
-                    dis:`您已${req.clientParam.state==1?"通过":"拒绝"}项目${objProject.name}加入团队${obj.from.name}`,
+                    name:req.clientParam.state==1?"您已同意接口项目加入团队":"您已拒绝接口项目加入团队",
+                    dis:`您已${req.clientParam.state==1?"通过":"拒绝"}接口项目${objProject.name}加入团队${obj.from.name}`,
                     user:req.userInfo._id,
                     type:1
                 }))
@@ -2539,14 +2367,26 @@ function Project() {
                         }
                     }
                 }
-                arr.forEach(function (obj) {
-                    objGroup[obj]=await (group.createAsync({
-                        name:obj,
+                if(arr.length>0)
+                {
+                    arr.forEach(function (obj) {
+                        objGroup[obj]=await (group.createAsync({
+                            name:obj,
+                            project:objProject._id,
+                            type:0,
+                            id:uuid()
+                        }));
+                    })
+                }
+                else
+                {
+                    objGroup["未命名"]=await (group.createAsync({
+                        name:"未命名",
                         project:objProject._id,
                         type:0,
                         id:uuid()
                     }));
-                })
+                }
             }
             let objDef={};
             function handleDef(def,root,arrDef) {
@@ -2616,7 +2456,7 @@ function Project() {
                         objRaw.data.push(obj1);
                     }
                 }
-                else if(obj.type=="object")
+                else if(obj.type=="object" || obj.type===undefined)
                 {
                     objRaw.type=4;
                     objRaw.data=[];
@@ -2711,7 +2551,7 @@ function Project() {
                     let update={
                         name:name,
                         project:objProject._id,
-                        group:objGroup[interRaw.tags[0]]._id,
+                        group:interRaw.tags?objGroup[interRaw.tags[0]]._id:objGroup["未命名"]._id,
                         url:path,
                         remark:interRaw.description,
                         method:method.toUpperCase(),
@@ -3411,39 +3251,63 @@ function Project() {
                         }
                     }
                 }
-                arr.forEach(function (obj) {
-                    let query={
-                        name:obj.name,
-                        project:req.obj._id
-                    }
-                    if(req.version)
+                if(arr.length>0)
+                {
+                    arr.forEach(function (obj) {
+                        let query={
+                            name:obj.name,
+                            project:req.obj._id
+                        }
+                        if(req.version)
+                        {
+                            query.version=req.version._id
+                        }
+                        objGroup[obj]=await (req.groupModel.findOneAsync(query));
+                        if(objGroup[obj])
+                        {
+                            objGroup[obj]=await (req.groupModel.findOneAndUpdateAsync({
+                                _id:objGroup[obj]._id
+                            },{
+                                name:obj,
+                                $unset:{
+                                    delete:1
+                                }
+                            },{
+                                new:true
+                            }))
+                        }
+                        else
+                        {
+                            objGroup[obj]=await (req.groupModel.createAsync({
+                                name:obj,
+                                project:objProject._id,
+                                type:0,
+                                id:uuid(),
+                            }));
+                        }
+                    })
+                }
+                else
+                {
+                    let objUnName=await (req.groupModel.findOneAsync({
+                        name:"未命名",
+                        project:objProject._id,
+                        type:0,
+                    }));
+                    if(!objUnName)
                     {
-                        query.version=req.version._id
-                    }
-                    objGroup[obj]=await (req.groupModel.findOneAsync(query));
-                    if(objGroup[obj])
-                    {
-                        objGroup[obj]=await (req.groupModel.findOneAndUpdateAsync({
-                            _id:objGroup[obj]._id
-                        },{
-                            name:obj,
-                            $unset:{
-                                delete:1
-                            }
-                        },{
-                            new:true
-                        }))
-                    }
-                    else
-                    {
-                        objGroup[obj]=await (req.groupModel.createAsync({
-                            name:obj,
+                        objGroup["未命名"]=await (req.groupModel.createAsync({
+                            name:"未命名",
                             project:objProject._id,
                             type:0,
                             id:uuid(),
                         }));
                     }
-                })
+                    else
+                    {
+                        objGroup["未命名"]=objUnName;
+                    }
+                }
             }
             let objDef={};
             function handleDef(def,root,arrDef) {
@@ -3513,7 +3377,7 @@ function Project() {
                         objRaw.data.push(obj1);
                     }
                 }
-                else if(obj.type=="object")
+                else if(obj.type=="object" || obj.type===undefined)
                 {
                     objRaw.type=4;
                     objRaw.data=[];
@@ -3647,7 +3511,7 @@ function Project() {
                         update={
                             name:name,
                             project:objProject._id,
-                            group:objGroup[interRaw.tags[0]]._id,
+                            group:interRaw.tags?objGroup[interRaw.tags[0]]._id:objGroup["未命名"]._id,
                             url:path,
                             remark:interRaw.description,
                             method:method.toUpperCase(),
@@ -4652,6 +4516,333 @@ function Project() {
             objProject._doc.interfaceCount=interfaceCount;
             objProject._doc.own=1;
             util.ok(res,objProject,"导入成功");
+        }
+        catch (err)
+        {
+            util.catch(res,err);
+        }
+    })
+    this.exportDocx=async ((req,res)=>{
+        try
+        {
+            var docx=office("docx");
+            let func=async (function(req,id,obj) {
+                let query={
+                    project:id,
+                    parent:obj?obj.id:{
+                        $exists:false
+                    }
+                }
+                if(req.headers["docleverversion"])
+                {
+                    query.version=req.headers["docleverversion"]
+                }
+                let arr=await (req.groupModel.findAsync(query,null))
+                for(let obj of arr)
+                {
+                    await (func(req,id,obj));
+                }
+                if(obj)
+                {
+                    let arrInterface=await (req.interfaceModel.findAsync({
+                        group:obj._id
+                    },null));
+                    for(let o of arrInterface)
+                    {
+                        handleDoc(o);
+                    }
+                }
+            })
+            function handleDoc(obj) {
+                var pObj = docx.createP ({
+                    align:"center"
+                });
+                pObj.addText(obj.name,{
+                    font_size:20
+                });
+                pObj=docx.createP();
+                pObj.addLineBreak();
+                pObj.addText(`method:${obj.method}`,{
+                    font_size:18
+                });
+                pObj.addLineBreak();
+                pObj.addText(`path:${obj.url}`,{
+                    font_size:18
+                });
+                pObj.addLineBreak();
+                pObj.addText(`status:${obj.finish==1?"开发完成":(obj.finish==2?"已废弃":"未完成")}`,{
+                    font_size:18
+                });
+                pObj.addLineBreak();
+                pObj.addText(`reamrk:${obj.remark}`,{
+                    font_size:18
+                });
+                pObj.addLineBreak();
+                for(let o of obj.param)
+                {
+                    pObj=docx.createP();
+                    pObj.addText(`参数实例:${o.name}`,{
+                        font_size:18,
+                        bold:true
+                    });
+                    pObj.addLineBreak();
+                    if(o.restParam.length>0)
+                    {
+                        pObj=docx.createP();
+                        pObj.addText(`Rest Param:`,{
+                            font_size:18
+                        });
+                        pObj.addLineBreak();
+                        let table = [
+                            [{
+                                val: "名称",
+                                opts: {
+                                    b:true,
+                                    sz: '24',
+                                    shd: {
+                                        fill: "7F7F7F",
+                                        themeFill: "text1",
+                                        "themeFillTint": "80"
+                                    },
+                                    fontFamily: "Avenir Book"
+                                }
+                            },{
+                                val: "备注",
+                                opts: {
+                                    align: "center",
+                                    vAlign: "center",
+                                    b:true,
+                                    sz: '24',
+                                    shd: {
+                                        fill: "92CDDC",
+                                        themeFill: "text1",
+                                        "themeFillTint": "80"
+                                    }
+                                }
+                            }]
+                        ];
+                        o.restParam.forEach(function (obj) {
+                            table.push([
+                                obj.name,
+                                obj.remark?obj.remark:""
+                            ])
+                        })
+                        let tableStyle = {
+                            tableColWidth: 4261,
+                            tableSize: 24,
+                            tableColor: "ada",
+                            tableAlign: "center",
+                            tableFontFamily: "Comic Sans MS",
+                            borders: true
+                        }
+                        docx.createTable(table,tableStyle);
+                    }
+                    if(o.queryParam.length>0)
+                    {
+                        pObj=docx.createP();
+                        pObj.addText(`Query:`,{
+                            font_size:18
+                        });
+                        pObj.addLineBreak();
+                        let table = [
+                            [{
+                                val: "名称",
+                                opts: {
+                                    b:true,
+                                    sz: '24',
+                                    shd: {
+                                        fill: "7F7F7F",
+                                        themeFill: "text1",
+                                        "themeFillTint": "80"
+                                    },
+                                    fontFamily: "Avenir Book"
+                                }
+                            },{
+                                val: "是否必填",
+                                opts: {
+                                    b:true,
+                                    sz: '24',
+                                    shd: {
+                                        fill: "7F7F7F",
+                                        themeFill: "text1",
+                                        "themeFillTint": "80"
+                                    },
+                                    fontFamily: "Avenir Book"
+                                }
+                            },{
+                                val: "备注",
+                                opts: {
+                                    align: "center",
+                                    vAlign: "center",
+                                    b:true,
+                                    sz: '24',
+                                    shd: {
+                                        fill: "92CDDC",
+                                        themeFill: "text1",
+                                        "themeFillTint": "80"
+                                    }
+                                }
+                            }]
+                        ];
+                        o.queryParam.forEach(function (obj) {
+                            table.push([
+                                obj.name,
+                                obj.must?"必填":"选填",
+                                obj.remark?obj.remark:""
+                            ])
+                        })
+                        let tableStyle = {
+                            tableColWidth: 4261,
+                            tableSize: 24,
+                            tableColor: "ada",
+                            tableAlign: "center",
+                            tableFontFamily: "Comic Sans MS",
+                            borders: true
+                        }
+                        docx.createTable(table,tableStyle);
+                    }
+                    if(obj.method=="POST" || obj.method=="PUT" || obj.method=="PATCH")
+                    {
+                        pObj=docx.createP();
+                        if(o.bodyInfo.type==0)
+                        {
+                            if(o.bodyParam.length>0)
+                            {
+                                pObj.addText(`Body:`,{
+                                    font_size:18
+                                });
+                                pObj.addLineBreak();
+                                let table = [
+                                    [{
+                                        val: "名称",
+                                        opts: {
+                                            b:true,
+                                            sz: '24',
+                                            shd: {
+                                                fill: "7F7F7F",
+                                                themeFill: "text1",
+                                                "themeFillTint": "80"
+                                            },
+                                            fontFamily: "Avenir Book"
+                                        }
+                                    },{
+                                        val: "类型",
+                                        opts: {
+                                            b:true,
+                                            sz: '24',
+                                            shd: {
+                                                fill: "7F7F7F",
+                                                themeFill: "text1",
+                                                "themeFillTint": "80"
+                                            },
+                                            fontFamily: "Avenir Book"
+                                        }
+                                    },{
+                                        val: "是否必填",
+                                        opts: {
+                                            b:true,
+                                            sz: '24',
+                                            shd: {
+                                                fill: "7F7F7F",
+                                                themeFill: "text1",
+                                                "themeFillTint": "80"
+                                            },
+                                            fontFamily: "Avenir Book"
+                                        }
+                                    },{
+                                        val: "备注",
+                                        opts: {
+                                            align: "center",
+                                            vAlign: "center",
+                                            b:true,
+                                            sz: '24',
+                                            shd: {
+                                                fill: "92CDDC",
+                                                themeFill: "text1",
+                                                "themeFillTint": "80"
+                                            }
+                                        }
+                                    }]
+                                ];
+                                o.bodyParam.forEach(function (obj) {
+                                    table.push([
+                                        obj.name,
+                                        obj.type==0?"文本":"文件",
+                                        obj.must?"必填":"选填",
+                                        obj.remark?obj.remark:""
+                                    ])
+                                })
+                                let tableStyle = {
+                                    tableColWidth: 4261,
+                                    tableSize: 24,
+                                    tableColor: "ada",
+                                    tableAlign: "center",
+                                    tableFontFamily: "Comic Sans MS",
+                                    borders: true
+                                }
+                                docx.createTable(table,tableStyle);
+                            }
+                        }
+                        else
+                        {
+                            if(o.bodyInfo.rawType==2)
+                            {
+                                let result=o.bodyInfo.rawJSONType==1?[]:{};
+                                util.convertToJSON(o.bodyInfo.rawJSON,result);
+                                let str=util.formatJson(result);
+                                pObj.addText(`Body JSON:`,{
+                                    font_size:18
+                                });
+                                pObj.addLineBreak();
+                                pObj.addText(str,{
+                                    back:"F0F1F2",
+                                    border: 'dotted',
+                                    borderSize: 2,
+                                    borderColor: '88CCFF'
+                                })
+                            }
+
+                        }
+                    }
+                    if(o.outInfo.type==0)
+                    {
+                        pObj=docx.createP();
+                        let result=o.outInfo.rawJSONType==1?[]:{};
+                        util.convertToJSON(o.outParam,result);
+                        let str=util.formatJson(result);
+                        pObj.addText(`Result JSON:`,{
+                            font_size:18
+                        });
+                        pObj.addLineBreak();
+                        pObj.addText(str,{
+                            back:"F0F1F2",
+                            border: 'dotted',
+                            borderSize: 2,
+                            borderColor: '88CCFF'
+                        })
+                    }
+                    else
+                    {
+                        pObj=docx.createP();
+                        pObj.addText(`Result Raw:${o.outInfo.rawRemark}`,{
+                            font_size:18
+                        });
+                    }
+                }
+                pObj=docx.createP();
+                pObj.addHorizontalLine();
+            }
+            await (func(req,req.clientParam.id,null));
+            res.writeHead(200,{
+                'Content-Type': 'application/octet-stream',
+                'Content-Disposition': 'attachment; filename*=UTF-8\'\''+encodeURIComponent(req.obj.name)+".docx",
+                "Transfer-Encoding": "chunked",
+                "Expires":0,
+                "Cache-Control":"must-revalidate, post-check=0, pre-check=0",
+                "Content-Transfer-Encoding":"binary",
+                "Pragma":"public",
+            });
+            docx.generate(res);
         }
         catch (err)
         {
